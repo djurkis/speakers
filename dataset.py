@@ -11,6 +11,7 @@ from sentence_transformers import (
     SentencesDataset,
     InputExample,
     losses,
+    evaluation,
     SentenceTransformer,
 )
 
@@ -59,7 +60,7 @@ def make_sents(path):
 
     # contrastive
     se1,se2 = [],[]
-    labels = []
+    labs = []
 
     # MultipleNegative
     # https://www.sbert.net/examples/training/quora_duplicate_questions/README.html#multiplenegativesrankingloss
@@ -71,16 +72,20 @@ def make_sents(path):
         labels = [class_map[line["tag"]] for line in dial]
 
         for s, l in zip(sents, labels):
-            for s2, l2 in zip(sents[1:], labels[1:]):
+            for s2, l2 in zip(sents, labels):
+                if s==s2:
+                    continue
                 if l2 == l:
                     se1.append(s)
                     se2.append(s2)
+                    labs.append(1)
                 if l != l2:
                     se1.append(s)
                     se2.append(s2)
-                    labels.append(0)
+                    labs.append(0)
 
-    return se1,se2,labels
+    logger.info(len(se1))
+    return se1,se2,labs
 
 
 
@@ -93,13 +98,13 @@ def make_sents(path):
 def main(args):
 
     con, mul = make_examples(args.train_path)
-    s1,s2,l = make_examples(args.dev_path)
+    s1,s2,l = make_sents(args.dev_path)
 
-    eval = sentence_transformers.evaluation.BinaryClassificationEvaluator(
+    evalu = evaluation.BinaryClassificationEvaluator(
     s1,s2,l,name="output_dev"
     )
 
-    model = SentenceTransformer("distilbert-base-nli-mean-tokens")
+    model = SentenceTransformer("distilroberta-base-paraphrase-v1")
     distance_metric = losses.SiameseDistanceMetric.COSINE_DISTANCE
 
     train_mulneg_dataset = SentencesDataset(mul, model=model)
@@ -117,7 +122,7 @@ def main(args):
     )
 
     model_save_path = (
-        args.out_dir + "training_multi" + datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        args.out_dir + "training_large" + datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     )
 
     os.makedirs(model_save_path, exist_ok=True)
@@ -127,11 +132,12 @@ def main(args):
             (train_mulneg_dataloader, train_mulneg_loss),
             (train_contrastive_dataloader, train_contrastive_loss),
         ],
+        evaluator=evalu,
         epochs=args.epochs,
         warmup_steps=1000,
-        output_path="out",
+        output_path="out_large",
     )
-    model.save("output2_big")
+    model.save("out_large_saved")
 
 
 if __name__ == "__main__":
@@ -149,6 +155,6 @@ if __name__ == "__main__":
 
     ap.add_argument("--out_dir", type=str, default="training")
     ap.add_argument("--epochs", default=5, type=int)
-    ap.add_argument("--batch_size", default=64, type=int)
+    ap.add_argument("--batch_size", default=128, type=int)
     ap = ap.parse_args()
     main(ap)
